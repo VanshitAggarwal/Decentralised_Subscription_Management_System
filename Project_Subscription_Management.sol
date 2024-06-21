@@ -1,89 +1,107 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.18;
 
 contract SubscriptionManagement {
-    address public owner; // Address of the contract owner
+    address public owner;
 
     struct Plan {
-        uint256 id; // Unique identifier for the subscription plan
-        string name; // Name of the subscription plan
-        uint256 price; // Price of the subscription plan in wei
-        uint256 duration; // Duration of the subscription plan in seconds
+        uint256 id;
+        string name;
+        uint256 price; // in wei
+        uint256 duration; // in seconds
     }
 
     struct Subscriber {
-        uint256 planId; // ID of the subscribed plan
-        uint256 endTime; // Timestamp when the subscription ends
+        uint256 planId;
+        uint256 endTime;
     }
 
-    uint256 public planCount; // Counter for the number of subscription plans
-    mapping(uint256 => Plan) public plans; // Mapping of plan IDs to Plan structs
-    mapping(address => Subscriber) public subscribers; // Mapping of subscriber addresses to Subscriber structs
+    uint256 public planCount;
+    mapping(uint256 => Plan) public plans;
+    mapping(address => Subscriber) public subscribers;
 
-    event PlanCreated(uint256 id, string name, uint256 price, uint256 duration); // Event emitted when a new plan is created
-    event Subscribed(address subscriber, uint256 planId, uint256 endTime); // Event emitted when a subscriber subscribes to a plan
-    event Unsubscribed(address subscriber, uint256 planId); // Event emitted when a subscriber unsubscribes from a plan
+    event PlanCreated(uint256 id, string name, uint256 price, uint256 duration);
+    event Subscribed(address subscriber, uint256 planId, uint256 endTime);
+    event Unsubscribed(address subscriber, uint256 planId);
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only the owner can perform this action"); // Restricts access to only the contract owner
+        require(msg.sender == owner, "Only the owner can perform this action");
         _;
     }
 
     modifier validPlanId(uint256 _planId) {
-        require(_planId > 0 && _planId <= planCount, "Invalid plan ID"); // Ensures the plan ID is valid
+        require(_planId > 0 && _planId <= planCount, "Invalid plan ID");
         _;
     }
 
     constructor() {
-        owner = msg.sender; // Sets the contract deployer as the initial owner
-        planCount = 0; // Initializes planCount to zero
+        owner = msg.sender;
+        planCount = 0;
     }
 
     // Function to create a new subscription plan
     function createPlan(string memory _name, uint256 _price, uint256 _duration) public onlyOwner {
-        require(bytes(_name).length > 0, "Plan name cannot be empty"); // Ensures the plan name is not empty
-        require(_price > 0, "Plan price must be greater than zero"); // Ensures the plan price is greater than zero
-        require(_duration > 0, "Plan duration must be greater than zero"); // Ensures the plan duration is greater than zero
+        require(bytes(_name).length > 0, "Plan name cannot be empty");
+        require(_price > 0, "Plan price must be greater than zero");
+        require(_duration > 0, "Plan duration must be greater than zero");
 
-        planCount++; // Increments the plan counter
-        plans[planCount] = Plan(planCount, _name, _price, _duration); // Adds the new plan to the plans mapping
+        planCount++;
+        plans[planCount] = Plan(planCount, _name, _price, _duration);
 
-        emit PlanCreated(planCount, _name, _price, _duration); // Emits an event indicating a new plan has been created
+        emit PlanCreated(planCount, _name, _price, _duration);
     }
 
     // Function for a subscriber to subscribe to a plan
     function subscribe(uint256 _planId) public payable validPlanId(_planId) {
-        Plan memory plan = plans[_planId]; // Retrieves the plan from the plans mapping
-        require(msg.value == plan.price, "Incorrect payment amount"); // Ensures the subscriber pays the correct amount for the plan
+        Plan memory plan = plans[_planId];
+        require(msg.value == plan.price, "Incorrect payment amount");
 
-        subscribers[msg.sender] = Subscriber(_planId, block.timestamp + plan.duration); // Records the subscriber and subscription end time
+        // Check if the user is already subscribed
+        if (subscribers[msg.sender].endTime > block.timestamp) {
+            revert("Already subscribed to a plan");
+        }
 
-        emit Subscribed(msg.sender, _planId, block.timestamp + plan.duration); // Emits an event indicating a successful subscription
+        subscribers[msg.sender] = Subscriber(_planId, block.timestamp + plan.duration);
+
+        emit Subscribed(msg.sender, _planId, block.timestamp + plan.duration);
+
+        // Assert to ensure the subscription was recorded correctly
+        assert(subscribers[msg.sender].planId == _planId);
+        assert(subscribers[msg.sender].endTime == block.timestamp + plan.duration);
     }
 
     // Function for a subscriber to unsubscribe from their current plan
     function unsubscribe() public {
-        require(subscribers[msg.sender].endTime > block.timestamp, "Subscription already expired or does not exist"); // Ensures the subscriber has an active subscription
+        require(subscribers[msg.sender].endTime > block.timestamp, "Subscription already expired or does not exist");
 
-        uint256 planId = subscribers[msg.sender].planId; // Retrieves the plan ID of the subscriber
-        delete subscribers[msg.sender]; // Removes the subscriber's subscription record
+        uint256 planId = subscribers[msg.sender].planId;
+        delete subscribers[msg.sender];
 
-        emit Unsubscribed(msg.sender, planId); // Emits an event indicating successful unsubscription
+        emit Unsubscribed(msg.sender, planId);
+
+        // Assert to ensure the subscriber's record was deleted
+        assert(subscribers[msg.sender].planId == 0);
+        assert(subscribers[msg.sender].endTime == 0);
     }
 
     // Function to check the subscription status of a subscriber
     function getSubscriptionStatus(address _subscriber) public view returns (bool, uint256) {
-        Subscriber memory subscriber = subscribers[_subscriber]; // Retrieves the subscription details of the subscriber
-
+        Subscriber memory subscriber = subscribers[_subscriber];
         if (subscriber.endTime > block.timestamp) {
-            return (true, subscriber.endTime); // Returns true and the end time if the subscription is active
+            return (true, subscriber.endTime);
         } else {
-            return (false, 0); // Returns false and 0 if the subscription is inactive or does not exist
+            return (false, 0);
         }
     }
 
     // Function for the contract owner to withdraw contract funds
     function withdrawFunds() public onlyOwner {
-        payable(owner).transfer(address(this).balance); // Transfers the contract balance to the owner
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds to withdraw");
+
+        payable(owner).transfer(balance);
+
+        // Assert to ensure the contract balance is zero after withdrawal
+        assert(address(this).balance == 0);
     }
 }
